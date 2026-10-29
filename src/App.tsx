@@ -1,30 +1,32 @@
 /**
  * ConfirmAm - Multi-Source Counterfeit Product Detection
  * Complete Single-File Application
- *
+ * 
  * FEATURES:
  * - Camera capture (FIXED: video element always in DOM)
+ * - OCR auto-detection (Tesseract.js extracts NAFDAC + barcode)
  * - NAFDAC number verification
  * - Barcode verification
- * - Multi-source results (NAFDAC, Open Food Facts, Go-UPC)
+ * - Multi-source results (8 databases)
  * - Desktop & Mobile responsive design
  */
 
 import React, { useRef, useState, useCallback, useEffect } from 'react';
-import {
+import { 
   Camera, Keyboard, Shield, AlertTriangle, CheckCircle, Info,
   X, RefreshCw, Upload, Zap, ArrowLeft, Scan, FileSearch, Database,
   Phone, ExternalLink, Home, Search, AlertCircle, XCircle,
   Barcode, Globe
 } from 'lucide-react';
-import {
-  runMultiSourceVerification,
+import { 
+  runMultiSourceVerification, 
   validateNafdacFormat,
   VerificationResult,
   VerificationInput,
   SourceResult,
   VerificationStatus
 } from './services/verificationEngine';
+import { extractFromImage } from './services/ocrService';
 
 type AppScreen = 'home' | 'camera' | 'processing' | 'results' | 'manual' | 'barcode';
 type ProcessingStage = 'analyzing' | 'extracting' | 'verifying' | 'completing';
@@ -35,10 +37,8 @@ type ProcessingStage = 'analyzing' | 'extracting' | 'verifying' | 'completing';
 
 const HomeScreen: React.FC<{ onNavigate: (screen: AppScreen) => void }> = ({ onNavigate }) => (
   <div className="min-h-screen bg-gradient-to-b from-emerald-50 via-white to-emerald-50/30">
-    {/* Desktop wrapper */}
     <div className="md:max-w-2xl md:mx-auto md:py-8">
       <div className="md:bg-white md:rounded-3xl md:shadow-xl md:overflow-hidden">
-        {/* Header */}
         <header className="bg-gradient-to-br from-emerald-700 to-emerald-800 text-white px-5 py-6 pb-8 md:rounded-t-3xl">
           <div className="flex items-center gap-3 mb-3">
             <div className="w-12 h-12 bg-white/20 backdrop-blur rounded-2xl flex items-center justify-center">
@@ -54,40 +54,36 @@ const HomeScreen: React.FC<{ onNavigate: (screen: AppScreen) => void }> = ({ onN
           </p>
         </header>
 
-        {/* Main Content */}
         <main className="px-5 -mt-4 pb-8">
-          {/* Scan Product */}
-          <button
-            onClick={() => onNavigate('camera')}
-            className="w-full bg-white rounded-2xl shadow-md border border-gray-100 p-5 mb-3
+          <button 
+            onClick={() => onNavigate('camera')} 
+            className="w-full bg-white rounded-2xl shadow-md border border-gray-100 p-5 mb-3 
                        hover:shadow-lg hover:border-emerald-200 transition-all duration-200 text-left group"
           >
             <div className="flex items-start gap-4">
-              <div className="w-14 h-14 bg-gradient-to-br from-emerald-100 to-emerald-50 rounded-2xl
+              <div className="w-14 h-14 bg-gradient-to-br from-emerald-100 to-emerald-50 rounded-2xl 
                             flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
                 <Camera className="w-7 h-7 text-emerald-700" />
               </div>
               <div className="flex-1">
                 <h2 className="text-lg font-bold text-gray-900 mb-1">Scan Product</h2>
                 <p className="text-sm text-gray-600 leading-relaxed">
-                  Take a photo of product packaging for AI analysis.
+                  Take a photo — AI auto-detects NAFDAC number and barcode.
                 </p>
                 <div className="flex items-center gap-1 mt-2 text-emerald-700 text-xs font-semibold">
-                  <span>Tap to start camera</span>
-                  <span>→</span>
+                  <span>Tap to start camera</span><span>→</span>
                 </div>
               </div>
             </div>
           </button>
 
-          {/* Enter NAFDAC Number */}
-          <button
-            onClick={() => onNavigate('manual')}
-            className="w-full bg-white rounded-2xl shadow-md border border-gray-100 p-5 mb-3
+          <button 
+            onClick={() => onNavigate('manual')} 
+            className="w-full bg-white rounded-2xl shadow-md border border-gray-100 p-5 mb-3 
                        hover:shadow-lg hover:border-blue-200 transition-all duration-200 text-left group"
           >
             <div className="flex items-start gap-4">
-              <div className="w-14 h-14 bg-gradient-to-br from-blue-100 to-blue-50 rounded-2xl
+              <div className="w-14 h-14 bg-gradient-to-br from-blue-100 to-blue-50 rounded-2xl 
                             flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
                 <Keyboard className="w-7 h-7 text-blue-700" />
               </div>
@@ -97,21 +93,19 @@ const HomeScreen: React.FC<{ onNavigate: (screen: AppScreen) => void }> = ({ onN
                   Verify against NAFDAC Greenbook registry.
                 </p>
                 <div className="flex items-center gap-1 mt-2 text-blue-700 text-xs font-semibold">
-                  <span>NAFDAC verification</span>
-                  <span>→</span>
+                  <span>NAFDAC verification</span><span>→</span>
                 </div>
               </div>
             </div>
           </button>
 
-          {/* Scan Barcode */}
-          <button
-            onClick={() => onNavigate('barcode')}
-            className="w-full bg-white rounded-2xl shadow-md border border-gray-100 p-5 mb-6
+          <button 
+            onClick={() => onNavigate('barcode')} 
+            className="w-full bg-white rounded-2xl shadow-md border border-gray-100 p-5 mb-6 
                        hover:shadow-lg hover:border-purple-200 transition-all duration-200 text-left group"
           >
             <div className="flex items-start gap-4">
-              <div className="w-14 h-14 bg-gradient-to-br from-purple-100 to-purple-50 rounded-2xl
+              <div className="w-14 h-14 bg-gradient-to-br from-purple-100 to-purple-50 rounded-2xl 
                             flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
                 <Barcode className="w-7 h-7 text-purple-700" />
               </div>
@@ -121,18 +115,16 @@ const HomeScreen: React.FC<{ onNavigate: (screen: AppScreen) => void }> = ({ onN
                   Check barcode against global product databases.
                 </p>
                 <div className="flex items-center gap-1 mt-2 text-purple-700 text-xs font-semibold">
-                  <span>Barcode verification</span>
-                  <span>→</span>
+                  <span>Barcode verification</span><span>→</span>
                 </div>
               </div>
             </div>
           </button>
 
-          {/* Verification Sources */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 mb-4">
             <h3 className="text-base font-bold text-gray-900 mb-3 flex items-center gap-2">
               <Globe className="w-4 h-4 text-emerald-600" />
-              Verification Sources
+              Verification Sources (8 Total)
             </h3>
             <div className="space-y-2.5">
               <div className="flex items-center gap-3">
@@ -143,23 +135,36 @@ const HomeScreen: React.FC<{ onNavigate: (screen: AppScreen) => void }> = ({ onN
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 bg-blue-100 rounded-xl flex items-center justify-center text-base">🥫</div>
+                <div className="w-9 h-9 bg-blue-100 rounded-xl flex items-center justify-center text-base">💊</div>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-gray-800">EMDEX (Pharma)</p>
+                  <p className="text-xs text-gray-500">15,000+ registered drugs</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 bg-teal-100 rounded-xl flex items-center justify-center text-base">🥫</div>
                 <div className="flex-1">
                   <p className="text-sm font-semibold text-gray-800">Open Food Facts</p>
                   <p className="text-xs text-gray-500">4M+ food products globally</p>
                 </div>
               </div>
               <div className="flex items-center gap-3">
+                <div className="w-9 h-9 bg-pink-100 rounded-xl flex items-center justify-center text-base">💄</div>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-gray-800">Open Beauty Facts</p>
+                  <p className="text-xs text-gray-500">Cosmetics database</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
                 <div className="w-9 h-9 bg-purple-100 rounded-xl flex items-center justify-center text-base">📊</div>
                 <div className="flex-1">
-                  <p className="text-sm font-semibold text-gray-800">Barcode Database</p>
-                  <p className="text-xs text-gray-500">Global product lookup</p>
+                  <p className="text-sm font-semibold text-gray-800">UPC Database</p>
+                  <p className="text-xs text-gray-500">642M+ products globally</p>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Result Meanings */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 mb-6">
             <h3 className="text-base font-bold text-gray-900 mb-3">Result Meanings</h3>
             <div className="space-y-2.5">
@@ -194,7 +199,7 @@ const HomeScreen: React.FC<{ onNavigate: (screen: AppScreen) => void }> = ({ onN
           </div>
 
           <footer className="text-center pb-4">
-            <p className="text-xs text-gray-400">ConfirmAm v2.0 • Multi-Source Verification</p>
+            <p className="text-xs text-gray-400">ConfirmAm v2.1 • Multi-Source Verification</p>
             <p className="text-xs text-gray-400 mt-1">Results are advisory. Always consult professionals.</p>
           </footer>
         </main>
@@ -204,7 +209,7 @@ const HomeScreen: React.FC<{ onNavigate: (screen: AppScreen) => void }> = ({ onN
 );
 
 // ============================================================================
-// CAMERA CAPTURE (FIXED)
+// CAMERA CAPTURE (FIXED + OCR AUTO-DETECTION)
 // ============================================================================
 
 const CameraCapture: React.FC<{ onCapture: (imageBase64: string) => void; onBack: () => void }> = ({ onCapture, onBack }) => {
@@ -212,21 +217,19 @@ const CameraCapture: React.FC<{ onCapture: (imageBase64: string) => void; onBack
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-
+  
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
 
-  // Initialize camera on mount
   useEffect(() => {
     let isMounted = true;
-
+    
     const initCamera = async () => {
       try {
-        // Request camera access
         const mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: {
+          video: { 
             facingMode: { ideal: 'environment' },
             width: { ideal: 1280 },
             height: { ideal: 720 }
@@ -240,46 +243,40 @@ const CameraCapture: React.FC<{ onCapture: (imageBase64: string) => void; onBack
         }
 
         streamRef.current = mediaStream;
-
-        // CRITICAL FIX: Video element must be in DOM before we set srcObject
-        // We wait a tick to ensure the video element is rendered
         await new Promise(resolve => setTimeout(resolve, 50));
 
         if (videoRef.current && isMounted) {
           videoRef.current.srcObject = mediaStream;
-
-          // CRITICAL FIX: Explicitly call play() - don't rely on autoplay
+          
           try {
             await videoRef.current.play();
           } catch (playError) {
             console.warn('[Camera] Play error:', playError);
           }
-
-          // Wait for video to actually start playing
+          
           const waitForVideo = () => new Promise<void>((resolve) => {
             if (!videoRef.current) { resolve(); return; }
-
+            
             if (videoRef.current.readyState >= 2) {
               resolve();
               return;
             }
-
+            
             const onLoaded = () => {
               resolve();
               videoRef.current?.removeEventListener('loadeddata', onLoaded);
             };
-
+            
             videoRef.current.addEventListener('loadeddata', onLoaded);
-
-            // Timeout fallback - resolve anyway after 2 seconds
+            
             setTimeout(() => {
               resolve();
               videoRef.current?.removeEventListener('loadeddata', onLoaded);
             }, 2000);
           });
-
+          
           await waitForVideo();
-
+          
           if (isMounted) {
             setCameraReady(true);
             setIsLoading(false);
@@ -287,9 +284,9 @@ const CameraCapture: React.FC<{ onCapture: (imageBase64: string) => void; onBack
         }
       } catch (err) {
         if (!isMounted) return;
-
+        
         console.error('[Camera] Error:', err);
-
+        
         let errorMessage = 'Could not access camera.';
         if (err instanceof DOMException) {
           if (err.name === 'NotAllowedError') {
@@ -300,7 +297,7 @@ const CameraCapture: React.FC<{ onCapture: (imageBase64: string) => void; onBack
             errorMessage = 'Camera is being used by another app. Please close other apps and try again.';
           }
         }
-
+        
         setError(errorMessage);
         setIsLoading(false);
       }
@@ -319,25 +316,24 @@ const CameraCapture: React.FC<{ onCapture: (imageBase64: string) => void; onBack
 
   const capturePhoto = useCallback(() => {
     if (!videoRef.current || !canvasRef.current) return;
-
+    
     const video = videoRef.current;
     const canvas = canvasRef.current;
-
+    
     canvas.width = video.videoWidth || 1280;
     canvas.height = video.videoHeight || 720;
-
+    
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
+    
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     const imageData = canvas.toDataURL('image/jpeg', 0.85);
-
-    // Stop camera after capture
+    
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
-
+    
     setCapturedImage(imageData);
     setCameraReady(false);
   }, []);
@@ -345,7 +341,7 @@ const CameraCapture: React.FC<{ onCapture: (imageBase64: string) => void; onBack
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-
+    
     if (!file.type.startsWith('image/')) {
       setError('Please select an image file');
       return;
@@ -354,7 +350,7 @@ const CameraCapture: React.FC<{ onCapture: (imageBase64: string) => void; onBack
       setError('Image too large (max 5MB)');
       return;
     }
-
+    
     const reader = new FileReader();
     reader.onload = (e) => {
       const result = e.target?.result as string;
@@ -372,7 +368,6 @@ const CameraCapture: React.FC<{ onCapture: (imageBase64: string) => void; onBack
     setCapturedImage(null);
     setError(null);
     setIsLoading(true);
-    // Re-init camera
     setTimeout(() => {
       window.location.reload();
     }, 100);
@@ -380,12 +375,10 @@ const CameraCapture: React.FC<{ onCapture: (imageBase64: string) => void; onBack
 
   return (
     <div className="min-h-screen bg-black flex flex-col relative">
-      {/* Top Bar */}
       <div className="absolute top-0 left-0 right-0 z-30 p-4 flex items-center justify-between safe-top">
         <button
           onClick={onBack}
-          className="w-11 h-11 bg-black/60 backdrop-blur-sm rounded-full flex items-center justify-center
-                     active:bg-black/80 transition-colors"
+          className="w-11 h-11 bg-black/60 backdrop-blur-sm rounded-full flex items-center justify-center active:bg-black/80 transition-colors"
           aria-label="Go back"
         >
           <ArrowLeft className="w-5 h-5 text-white" />
@@ -396,25 +389,18 @@ const CameraCapture: React.FC<{ onCapture: (imageBase64: string) => void; onBack
         <div className="w-11" />
       </div>
 
-      {/* Camera View Area */}
       <div className="flex-1 relative flex items-center justify-center overflow-hidden bg-black">
-        {/*
-          CRITICAL FIX: Video element is ALWAYS in the DOM.
-          We control visibility with opacity, not conditional rendering.
-          This ensures onloadedmetadata can fire properly.
-        */}
         <video
           ref={videoRef}
           playsInline
           muted
           className="absolute inset-0 w-full h-full object-cover transition-opacity duration-300"
-          style={{
+          style={{ 
             opacity: cameraReady && !capturedImage && !error ? 1 : 0,
             zIndex: 1
           }}
         />
 
-        {/* Captured Image Preview */}
         {capturedImage && (
           <img
             src={capturedImage}
@@ -424,7 +410,6 @@ const CameraCapture: React.FC<{ onCapture: (imageBase64: string) => void; onBack
           />
         )}
 
-        {/* Loading State */}
         {isLoading && !error && !capturedImage && (
           <div className="absolute inset-0 flex items-center justify-center bg-black" style={{ zIndex: 3 }}>
             <div className="text-center">
@@ -435,7 +420,6 @@ const CameraCapture: React.FC<{ onCapture: (imageBase64: string) => void; onBack
           </div>
         )}
 
-        {/* Error State */}
         {error && !capturedImage && (
           <div className="absolute inset-0 flex items-center justify-center bg-black px-6" style={{ zIndex: 3 }}>
             <div className="text-center max-w-sm">
@@ -445,8 +429,7 @@ const CameraCapture: React.FC<{ onCapture: (imageBase64: string) => void; onBack
               <p className="text-white text-sm mb-6 leading-relaxed">{error}</p>
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-medium
-                           active:bg-emerald-700 transition-colors inline-flex items-center gap-2"
+                className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-medium active:bg-emerald-700 transition-colors inline-flex items-center gap-2"
               >
                 <Upload className="w-5 h-5" />
                 Upload Photo Instead
@@ -455,17 +438,14 @@ const CameraCapture: React.FC<{ onCapture: (imageBase64: string) => void; onBack
           </div>
         )}
 
-        {/* Scanning Guide Overlay */}
         {cameraReady && !capturedImage && !error && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ zIndex: 4 }}>
             <div className="w-72 h-72 md:w-80 md:h-80 border-2 border-white/40 rounded-3xl relative">
-              {/* Corner markers */}
               <div className="absolute -top-1 -left-1 w-10 h-10 border-t-4 border-l-4 border-emerald-400 rounded-tl-2xl" />
               <div className="absolute -top-1 -right-1 w-10 h-10 border-t-4 border-r-4 border-emerald-400 rounded-tr-2xl" />
               <div className="absolute -bottom-1 -left-1 w-10 h-10 border-b-4 border-l-4 border-emerald-400 rounded-bl-2xl" />
               <div className="absolute -bottom-1 -right-1 w-10 h-10 border-b-4 border-r-4 border-emerald-400 rounded-br-2xl" />
-
-              {/* Instruction */}
+              
               <div className="absolute -bottom-16 left-0 right-0 text-center">
                 <p className="text-white text-sm bg-black/70 backdrop-blur px-4 py-2 rounded-full inline-block">
                   Position product label within frame
@@ -476,7 +456,6 @@ const CameraCapture: React.FC<{ onCapture: (imageBase64: string) => void; onBack
         )}
       </div>
 
-      {/* Bottom Controls */}
       <div className="bg-black/95 backdrop-blur-sm p-6 pb-8 safe-bottom" style={{ zIndex: 5 }}>
         {capturedImage ? (
           <div className="flex items-center justify-center gap-6">
@@ -487,11 +466,10 @@ const CameraCapture: React.FC<{ onCapture: (imageBase64: string) => void; onBack
             >
               <RefreshCw className="w-6 h-6 text-white" />
             </button>
-
+            
             <button
               onClick={() => capturedImage && onCapture(capturedImage)}
-              className="w-20 h-20 bg-emerald-600 hover:bg-emerald-500 rounded-full flex items-center justify-center
-                         shadow-lg shadow-emerald-600/30 transition-all active:scale-95"
+              className="w-20 h-20 bg-emerald-600 hover:bg-emerald-500 rounded-full flex items-center justify-center shadow-lg shadow-emerald-600/30 transition-all active:scale-95"
               aria-label="Analyze product"
             >
               <Zap className="w-8 h-8 text-white" />
@@ -514,15 +492,13 @@ const CameraCapture: React.FC<{ onCapture: (imageBase64: string) => void; onBack
             >
               <Upload className="w-6 h-6 text-white" />
             </button>
-
+            
             <button
               onClick={capturePhoto}
-              className="w-20 h-20 bg-white rounded-full flex items-center justify-center
-                         shadow-lg transition-all active:scale-95"
+              className="w-20 h-20 bg-white rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95"
               aria-label="Take photo"
             >
-              <div className="w-16 h-16 bg-white rounded-full border-4 border-gray-300
-                            flex items-center justify-center">
+              <div className="w-16 h-16 bg-white rounded-full border-4 border-gray-300 flex items-center justify-center">
                 <Camera className="w-7 h-7 text-gray-700" />
               </div>
             </button>
@@ -530,7 +506,7 @@ const CameraCapture: React.FC<{ onCapture: (imageBase64: string) => void; onBack
             <div className="w-14" />
           </div>
         ) : null}
-
+        
         {!capturedImage && !error && cameraReady && (
           <p className="text-center text-gray-400 text-xs mt-4">
             Make sure the product label is clearly visible and well-lit
@@ -538,7 +514,6 @@ const CameraCapture: React.FC<{ onCapture: (imageBase64: string) => void; onBack
         )}
       </div>
 
-      {/* Hidden elements */}
       <canvas ref={canvasRef} className="hidden" aria-hidden="true" />
       <input
         ref={fileInputRef}
@@ -564,11 +539,11 @@ const BarcodeEntry: React.FC<{ onSubmit: (barcode: string) => void; onBack: () =
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const clean = barcode.replace(/[\s-]/g, '');
-
+    
     if (!clean) { setError('Please enter a barcode number'); return; }
     if (clean.length < 8 || clean.length > 14) { setError('Barcode should be 8-14 digits'); return; }
     if (!/^\d+$/.test(clean)) { setError('Barcode should contain only numbers'); return; }
-
+    
     onSubmit(clean);
   };
 
@@ -590,14 +565,14 @@ const BarcodeEntry: React.FC<{ onSubmit: (barcode: string) => void; onBack: () =
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-5">
                 <label className="block text-sm font-semibold text-gray-800 mb-2">Barcode Number *</label>
-                <input
-                  type="text"
-                  value={barcode}
+                <input 
+                  type="text" 
+                  value={barcode} 
                   onChange={(e) => { setBarcode(e.target.value.replace(/\D/g, '')); setError(null); }}
-                  placeholder="e.g., 6156000100158"
+                  placeholder="e.g., 6156000100158" 
                   maxLength={14}
                   className={`w-full px-4 py-3.5 text-lg font-mono border-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 ${error ? 'border-red-300 bg-red-50' : 'border-gray-200 bg-gray-50'}`}
-                  autoComplete="off"
+                  autoComplete="off" 
                   inputMode="numeric"
                 />
                 {error && <div className="flex items-center gap-2 mt-2 text-red-600"><AlertCircle className="w-4 h-4" /><span className="text-xs">{error}</span></div>}
@@ -818,7 +793,7 @@ const ResultsDashboard: React.FC<{ result: VerificationResult; onNavigate: (scre
               <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden">
                 <div className={`h-full rounded-full transition-all duration-1000 ${result.overallStatus === 'safe' ? 'bg-green-500' : result.overallStatus === 'warning' ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${result.overallConfidence}%` }} />
               </div>
-
+              
               <div className="mt-3 pt-3 border-t border-gray-100 grid grid-cols-3 gap-2 text-center">
                 <div>
                   <p className="text-lg font-bold text-gray-800">{result.details.sourcesChecked}</p>
@@ -947,16 +922,16 @@ function App() {
       setProcessingStage('extracting');
       setCurrentSource('Initializing...');
       await new Promise(resolve => setTimeout(resolve, 300));
-
+      
       setProcessingStage('verifying');
-
+      
       const result = await runMultiSourceVerification(input, (stage, source) => {
         setCurrentSource(source);
       });
-
+      
       setProcessingStage('completing');
       await new Promise(resolve => setTimeout(resolve, 400));
-
+      
       setVerificationResult(result);
       setCurrentScreen('results');
     } catch (err) {
@@ -980,24 +955,41 @@ function App() {
 
     try {
       setProcessingStage('extracting');
-      setCurrentSource('Analyzing image...');
-      await new Promise(resolve => setTimeout(resolve, 1500));
-
-      // Simulate OCR extraction (in production, use Tesseract.js)
-      const mockExtracted: VerificationInput = {
-        nafdacNumber: '04-0123',
-        barcode: '6156000100158',
-      };
-
+      setCurrentSource('Extracting text from image...');
+      
+      // Perform OCR to extract NAFDAC number and barcode
+      const ocrResult = await extractFromImage(imageBase64);
+      
+      console.log('OCR Result:', ocrResult);
+      
+      // Build verification input from OCR results
+      const extractedInput: VerificationInput = {};
+      
+      if (ocrResult.nafdacNumber) {
+        extractedInput.nafdacNumber = ocrResult.nafdacNumber;
+      }
+      
+      if (ocrResult.barcode) {
+        extractedInput.barcode = ocrResult.barcode;
+      }
+      
+      // If OCR found nothing, show error
+      if (!extractedInput.nafdacNumber && !extractedInput.barcode) {
+        setError('Could not detect NAFDAC number or barcode in the image. Please try again with better lighting or enter manually.');
+        setCurrentScreen('home');
+        return;
+      }
+      
       setProcessingStage('verifying');
-
-      const result = await runMultiSourceVerification(mockExtracted, (stage, source) => {
+      setCurrentSource('Verifying product...');
+      
+      const result = await runMultiSourceVerification(extractedInput, (stage, source) => {
         setCurrentSource(source);
       });
-
+      
       setProcessingStage('completing');
       await new Promise(resolve => setTimeout(resolve, 400));
-
+      
       setVerificationResult(result);
       setCurrentScreen('results');
     } catch (err) {
