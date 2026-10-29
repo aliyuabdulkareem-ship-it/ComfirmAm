@@ -1,14 +1,22 @@
 /**
  * Multi-Source Verification Engine
- *
+ * 
  * Coordinates verification across multiple data sources:
  * 1. Open Food Facts API (free, works for food/beverages)
- * 2. Go-UPC API (barcode lookup via serverless proxy)
- * 3. NAFDAC Greenbook (via serverless proxy)
- * 4. Local mock database (fallback)
+ * 2. Open Beauty Facts API (free, works for cosmetics)
+ * 3. UPC Database (free, barcode lookup)
+ * 4. Go-UPC API (barcode lookup via serverless proxy)
+ * 5. NAFDAC Greenbook (via serverless proxy)
+ * 6. EMDEX API (pharmaceuticals - 15,000+ drugs)
+ * 7. Apify NAFDAC Scraper (packaged foods, water, cosmetics)
+ * 8. Local mock database (fallback - ONLY for testing)
  */
 
 import { lookupByBarcode } from './openFoodFacts';
+import { lookupBeautyByBarcode } from './openBeautyFactsService';
+import { lookupBuycottByBarcode } from './buycottService';
+import { verifyByNafdac as searchEMDEXAPI } from './emdexService';
+import { searchByNRN as searchApifyNAFDACAPI } from './apifyNafdacService';
 
 // ============================================================================
 // TYPES
@@ -94,7 +102,7 @@ export function validateNafdacFormat(nafdacNumber: string): {
 
   const cleaned = nafdacNumber.trim().toUpperCase().replace(/\s+/g, '');
   const match = cleaned.match(/^([A-Z0-9]{2})-?(\d{4,8})$/);
-
+  
   if (!match) {
     return { valid: false, normalized: cleaned };
   }
@@ -112,7 +120,7 @@ export function validateNafdacFormat(nafdacNumber: string): {
 }
 
 // ============================================================================
-// MOCK NAFDAC DATABASE (Fallback)
+// MOCK NAFDAC DATABASE (Testing Only - NOT used in production)
 // ============================================================================
 
 interface MockProduct {
@@ -123,38 +131,15 @@ interface MockProduct {
   barcode?: string;
 }
 
+// This is ONLY for testing when APIs are unavailable
+// In production, this should be empty or removed
 const MOCK_DATABASE: MockProduct[] = [
-  { nafdacNumber: '04-0123', productName: 'Paracetamol 500mg', manufacturer: 'Emzor Pharmaceuticals Ltd', category: 'pharmaceutical' },
-  { nafdacNumber: '05-4521', productName: 'Amoxicillin 250mg', manufacturer: 'May & Baker Nigeria Plc', category: 'pharmaceutical' },
-  { nafdacNumber: '01-2345', productName: 'Peak Evaporated Milk', manufacturer: 'FrieslandCampina WAMCO', category: 'food', barcode: '6156000100158' },
-  { nafdacNumber: '08-7712', productName: 'Dettol Antiseptic Liquid', manufacturer: 'Reckitt Benckiser Nigeria', category: 'cosmetics' },
-  { nafdacNumber: '03-9988', productName: 'Indomie Instant Noodles', manufacturer: 'Dufil Prima Foods Plc', category: 'food', barcode: '6156000100158' },
-  { nafdacNumber: '06-3344', productName: 'Nivea Body Lotion', manufacturer: 'Beiersdorf Nigeria', category: 'cosmetics' },
-  { nafdacNumber: '04-5567', productName: 'Artemether/Lumefantrine', manufacturer: 'Guangzhou Pharmaceutical', category: 'pharmaceutical' },
-  { nafdacNumber: '02-1199', productName: 'Coca-Cola 50cl', manufacturer: 'Nigerian Bottling Company', category: 'beverage', barcode: '5449000000996' },
-  { nafdacNumber: 'A1-0456', productName: 'Golden Penny Semolina', manufacturer: 'Flour Mills of Nigeria', category: 'food' },
-  { nafdacNumber: 'A2-0789', productName: 'Eva Table Water 75cl', manufacturer: 'Nestle Nigeria', category: 'water' },
-  { nafdacNumber: '01-3456', productName: 'Milo Chocolate Drink', manufacturer: 'Nestle Nigeria', category: 'beverage', barcode: '7613034262288' },
-  { nafdacNumber: '01-4567', productName: 'Maggi Star Seasoning', manufacturer: 'Nestle Nigeria', category: 'food' },
-  { nafdacNumber: 'A5-1234', productName: 'Nivea Crème', manufacturer: 'Beiersdorf Nigeria', category: 'cosmetics' },
-  { nafdacNumber: '01-5678', productName: 'Gino Tomato Paste', manufacturer: 'GB Foods Africa', category: 'food' },
-  { nafdacNumber: 'A2-2345', productName: 'Aquafina Water 75cl', manufacturer: 'Seven-Up Bottling Co', category: 'water' },
+  // Test data only - remove in production
 ];
 
 function lookupMockDatabase(nafdacNumber?: string, barcode?: string): MockProduct | null {
-  if (nafdacNumber) {
-    const normalized = nafdacNumber.replace(/[-/]/g, '').toUpperCase();
-    const found = MOCK_DATABASE.find(p =>
-      p.nafdacNumber.replace(/[-/]/g, '').toUpperCase() === normalized
-    );
-    if (found) return found;
-  }
-
-  if (barcode) {
-    const found = MOCK_DATABASE.find(p => p.barcode === barcode);
-    if (found) return found;
-  }
-
+  // DISABLED: Don't use mock database in production
+  // This was causing false positives (always returning Emzor)
   return null;
 }
 
@@ -167,7 +152,7 @@ async function verifyNafdacGreenbook(nafdacNumber: string): Promise<SourceResult
     const response = await fetch(`/api/verify-nafdac?number=${encodeURIComponent(nafdacNumber)}`, {
       signal: AbortSignal.timeout(10000)
     });
-
+    
     if (!response.ok) {
       const mock = lookupMockDatabase(nafdacNumber);
       if (mock) {
@@ -194,7 +179,7 @@ async function verifyNafdacGreenbook(nafdacNumber: string): Promise<SourceResult
     }
 
     const data = await response.json();
-
+    
     if (data.found) {
       return {
         id: 'nafdac_greenbook',
@@ -232,7 +217,7 @@ async function verifyNafdacGreenbook(nafdacNumber: string): Promise<SourceResult
         icon: '🏛️'
       };
     }
-
+    
     return {
       id: 'nafdac_greenbook',
       name: 'NAFDAC Registry',
@@ -250,7 +235,7 @@ async function verifyBarcodeGoUpc(barcode: string): Promise<SourceResult> {
     const response = await fetch(`/api/verify-barcode?code=${encodeURIComponent(barcode)}`, {
       signal: AbortSignal.timeout(10000)
     });
-
+    
     if (!response.ok) {
       return {
         id: 'go_upc',
@@ -263,7 +248,7 @@ async function verifyBarcodeGoUpc(barcode: string): Promise<SourceResult> {
     }
 
     const data = await response.json();
-
+    
     if (data.found) {
       return {
         id: 'go_upc',
@@ -299,6 +284,90 @@ async function verifyBarcodeGoUpc(barcode: string): Promise<SourceResult> {
 }
 
 // ============================================================================
+// EMDEX API VERIFICATION (Pharmaceuticals)
+// ============================================================================
+
+async function verifyEMDEXSource(nafdacNumber: string): Promise<SourceResult> {
+  try {
+    const result = await searchEMDEXAPI(nafdacNumber);
+    
+    if (result.found && result.product) {
+      return {
+        id: 'emdex',
+        name: 'EMDEX (Pharma)',
+        status: 'found',
+        confidence: result.confidence,
+        productName: result.product.brandName,
+        manufacturer: result.product.manufacturer,
+        category: 'pharmaceutical',
+        details: `Verified in EMDEX: ${result.product.brandName} (${result.product.genericName})`,
+        icon: '💊'
+      };
+    } else {
+      return {
+        id: 'emdex',
+        name: 'EMDEX (Pharma)',
+        status: 'not_found',
+        confidence: 0,
+        details: result.error || 'Product not found in EMDEX database',
+        icon: '💊'
+      };
+    }
+  } catch (error) {
+    return {
+      id: 'emdex',
+      name: 'EMDEX (Pharma)',
+      status: 'error',
+      confidence: 0,
+      error: error instanceof Error ? error.message : 'Network error',
+      icon: '💊'
+    };
+  }
+}
+
+// ============================================================================
+// APIFY NAFDAC SCRAPER (Packaged Foods, Water, Cosmetics)
+// ============================================================================
+
+async function verifyApifyNAFDACSource(nafdacNumber: string): Promise<SourceResult> {
+  try {
+    const result = await searchApifyNAFDACAPI(nafdacNumber);
+    
+    if (result.found && result.product) {
+      return {
+        id: 'apify_nafdac',
+        name: 'NAFDAC Registry (Apify)',
+        status: 'found',
+        confidence: result.confidence,
+        productName: result.product.productName,
+        manufacturer: result.product.manufacturer,
+        category: result.product.category.toLowerCase() as ProductCategory,
+        details: `Verified in NAFDAC Registry: ${result.product.productName} (${result.product.status})`,
+        icon: '🏛️'
+      };
+    } else {
+      return {
+        id: 'apify_nafdac',
+        name: 'NAFDAC Registry (Apify)',
+        status: 'not_found',
+        confidence: 0,
+        details: result.error || 'Product not found in NAFDAC registry',
+        icon: '🏛️'
+      };
+    }
+  } catch (error) {
+    return {
+      id: 'apify_nafdac',
+      name: 'NAFDAC Registry (Apify)',
+      status: 'error',
+      confidence: 0,
+      error: error instanceof Error ? error.message : 'Network error',
+      icon: '🏛️'
+    };
+  }
+}
+
+// ============================================================================
 // MAIN VERIFICATION ENGINE
 // ============================================================================
 
@@ -314,18 +383,18 @@ export async function runMultiSourceVerification(
   // Step 1: Validate NAFDAC format
   let nafdacFormatValid = false;
   let nafdacPrefixCategory: string | undefined;
-
+  
   if (input.nafdacNumber) {
     const validation = validateNafdacFormat(input.nafdacNumber);
     nafdacFormatValid = validation.valid;
     nafdacPrefixCategory = validation.categoryLabel;
-
+    
     sources.push({
       id: 'nafdac_format',
       name: 'NAFDAC Format',
       status: validation.valid ? 'found' : 'not_found',
       confidence: validation.valid ? 70 : 0,
-      details: validation.valid
+      details: validation.valid 
         ? `Valid NAFDAC format. Category: ${validation.categoryLabel}`
         : 'Invalid NAFDAC number format. Should be like: A4-0123 or 04-1234',
       icon: '🔢'
@@ -337,7 +406,7 @@ export async function runMultiSourceVerification(
     onProgress?.('verifying', 'NAFDAC Registry');
     const nafdacResult = await verifyNafdacGreenbook(input.nafdacNumber);
     sources.push(nafdacResult);
-
+    
     if (nafdacResult.status === 'found') {
       productName = productName || nafdacResult.productName;
       manufacturer = manufacturer || nafdacResult.manufacturer;
@@ -345,11 +414,37 @@ export async function runMultiSourceVerification(
     }
   }
 
+  // Step 2.5: Check EMDEX (for pharmaceuticals)
+  if (input.nafdacNumber && nafdacPrefixCategory?.toLowerCase().includes('pharma')) {
+    onProgress?.('verifying', 'EMDEX Pharma Database');
+    const emdexResult = await verifyEMDEXSource(input.nafdacNumber);
+    sources.push(emdexResult);
+    
+    if (emdexResult.status === 'found') {
+      productName = productName || emdexResult.productName;
+      manufacturer = manufacturer || emdexResult.manufacturer;
+      category = 'pharmaceutical';
+    }
+  }
+
+  // Step 2.6: Check Apify NAFDAC Scraper (for packaged foods, water, cosmetics)
+  if (input.nafdacNumber && !nafdacPrefixCategory?.toLowerCase().includes('pharma')) {
+    onProgress?.('verifying', 'NAFDAC Registry (Apify)');
+    const apifyResult = await verifyApifyNAFDACSource(input.nafdacNumber);
+    sources.push(apifyResult);
+    
+    if (apifyResult.status === 'found') {
+      productName = productName || apifyResult.productName;
+      manufacturer = manufacturer || apifyResult.manufacturer;
+      if (apifyResult.category) category = apifyResult.category as ProductCategory;
+    }
+  }
+
   // Step 3: Check Open Food Facts (via barcode proxy)
   if (input.barcode) {
     onProgress?.('verifying', 'Open Food Facts');
     const offResult = await lookupByBarcode(input.barcode);
-
+    
     sources.push({
       id: 'open_food_facts',
       name: 'Open Food Facts',
@@ -357,9 +452,9 @@ export async function runMultiSourceVerification(
       confidence: offResult.confidence,
       productName: offResult.product?.product_name,
       manufacturer: offResult.product?.brands,
-      category: offResult.product?.categories?.includes('beverage') ? 'beverage' :
+      category: offResult.product?.categories?.includes('beverage') ? 'beverage' : 
                 offResult.product?.categories?.includes('water') ? 'water' : 'food',
-      details: offResult.found
+      details: offResult.found 
         ? `Found: ${offResult.product?.product_name} by ${offResult.product?.brands || 'Unknown'}`
         : offResult.error || 'Product not in Open Food Facts database',
       icon: '🥫'
@@ -371,26 +466,77 @@ export async function runMultiSourceVerification(
     }
   }
 
+  // Step 3.5: Check Open Beauty Facts (for cosmetics)
+  if (input.barcode) {
+    onProgress?.('verifying', 'Open Beauty Facts');
+    const obfResult = await lookupBeautyByBarcode(input.barcode);
+    
+    sources.push({
+      id: 'open_beauty_facts',
+      name: 'Open Beauty Facts',
+      status: obfResult.found ? 'found' : 'not_found',
+      confidence: obfResult.confidence,
+      productName: obfResult.product?.product_name,
+      manufacturer: obfResult.product?.brands,
+      category: 'cosmetics',
+      details: obfResult.found 
+        ? `Found: ${obfResult.product?.product_name} by ${obfResult.product?.brands || 'Unknown'}`
+        : obfResult.error || 'Product not in Open Beauty Facts database',
+      icon: '💄'
+    });
+
+    if (obfResult.found && obfResult.product) {
+      productName = productName || obfResult.product.product_name;
+      manufacturer = manufacturer || obfResult.product.brands;
+      category = 'cosmetics';
+    }
+  }
+
+  // Step 3.6: Check UPC Database (free barcode lookup)
+  if (input.barcode) {
+    onProgress?.('verifying', 'UPC Database');
+    const upcResult = await lookupBuycottByBarcode(input.barcode);
+    
+    sources.push({
+      id: 'upc_database',
+      name: 'UPC Database',
+      status: upcResult.found ? 'found' : 'not_found',
+      confidence: upcResult.confidence,
+      productName: upcResult.product?.name,
+      manufacturer: upcResult.product?.brand,
+      category: upcResult.product?.categories?.[0] || 'other',
+      details: upcResult.found 
+        ? `Found: ${upcResult.product?.name} by ${upcResult.product?.brand || 'Unknown'}`
+        : upcResult.error || 'Product not in UPC Database',
+      icon: '📊'
+    });
+
+    if (upcResult.found && upcResult.product) {
+      productName = productName || upcResult.product.name;
+      manufacturer = manufacturer || upcResult.product.brand;
+    }
+  }
+
   // Step 4: Check Go-UPC barcode database
   if (input.barcode) {
     onProgress?.('verifying', 'Barcode Database');
     const goUpcResult = await verifyBarcodeGoUpc(input.barcode);
     sources.push(goUpcResult);
-
+    
     if (goUpcResult.status === 'found') {
       productName = productName || goUpcResult.productName;
       manufacturer = manufacturer || goUpcResult.manufacturer;
     }
   }
 
-  // Step 5: Fallback to mock database
+  // Step 5: Fallback to mock database (DISABLED)
   if (!productName && (input.nafdacNumber || input.barcode)) {
     const mock = lookupMockDatabase(input.nafdacNumber, input.barcode);
     if (mock) {
       productName = mock.productName;
       manufacturer = mock.manufacturer;
       category = mock.category;
-
+      
       sources.push({
         id: 'mock_fallback',
         name: 'Local Database',
@@ -407,11 +553,11 @@ export async function runMultiSourceVerification(
   // Step 6: Calculate overall result
   const sourcesChecked = sources.filter(s => s.status !== 'skipped').length;
   const sourcesFound = sources.filter(s => s.status === 'found').length;
-
+  
   const productNames = sources
     .filter(s => s.status === 'found' && s.productName)
     .map(s => s.productName?.toLowerCase().trim());
-  const crossReferenceMatch = productNames.length >= 2 &&
+  const crossReferenceMatch = productNames.length >= 2 && 
     productNames.every(name => name === productNames[0]);
 
   let overallStatus: VerificationStatus;
@@ -484,11 +630,11 @@ function generateRecommendations(
     recommendations.push('⚠️ Limited verification data available for this product.');
     recommendations.push('This does NOT necessarily mean the product is fake.');
     recommendations.push('Many legitimate Nigerian products are not yet in global databases.');
-
+    
     if (!nafdacFormatValid) {
       recommendations.push('The NAFDAC number format appears incorrect. Double-check the number on the packaging.');
     }
-
+    
     recommendations.push('For additional verification, visit: registration.nafdac.gov.ng');
     recommendations.push('Contact NAFDAC: 0800-NAFDAC-1 (0800-6233-221)');
   } else if (status === 'counterfeit') {
