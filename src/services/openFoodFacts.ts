@@ -1,6 +1,6 @@
 /**
  * Open Food Facts API Client
- *
+ * 
  * FREE API - No API key required!
  * Works directly from the browser (CORS enabled)
  * Coverage: 4+ million food products globally
@@ -40,7 +40,7 @@ export interface BarcodeLookupResult {
 export async function lookupByBarcode(barcode: string): Promise<BarcodeLookupResult> {
   try {
     const cleanBarcode = barcode.replace(/[\s-]/g, '');
-
+    
     if (!cleanBarcode || cleanBarcode.length < 8) {
       return {
         found: false,
